@@ -1,0 +1,52 @@
+server:
+  port: 8082
+  servlet:
+    context-path: /api/v1
+
+spring:
+  application:
+    name: storage-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/autobook_storage
+    username: user
+    password: password
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: true
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+cloud:
+  aws:
+    credentials:
+      #db nzid lcrendetials mn B3d
+      access-key: ${AWS_ACCESS_KEY} 
+      secret-key: ${AWS_SECRET_KEY}
+    region:
+      static: us-east-1
+    s3:
+      bucket: autobook-storage
+
+# If using minio for local S3 alternative
+minio:
+  url: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: autobook-storage
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+jwt:
+  secret: (to be added later )
