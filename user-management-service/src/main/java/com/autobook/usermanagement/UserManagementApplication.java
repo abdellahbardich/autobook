@@ -1,13 +1,11 @@
-package com.autobook.usermanagementservice;
+package com.autobook.usermanagement;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class UserManagementServiceApplication {
-
+public class UserManagementApplication {
 	public static void main(String[] args) {
-		SpringApplication.run(UserManagementServiceApplication.class, args);
+		SpringApplication.run(UserManagementApplication.class, args);
 	}
-
 }

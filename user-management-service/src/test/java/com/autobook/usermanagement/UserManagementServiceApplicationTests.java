@@ -1,4 +1,4 @@
-package com.autobook.usermanagementservice;
+package com.autobook.usermanagement;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
