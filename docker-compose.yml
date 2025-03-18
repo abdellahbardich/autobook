@@ -1,8 +1,68 @@
 version: '3.8'
 
 services:
+  # Database
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_MULTIPLE_DATABASES: autobook_user_db,autobook_conversation_db,autobook_book_db,autobook_collection_db
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/create-multiple-databases.sh:/docker-entrypoint-initdb.d/create-multiple-databases.sh
+    networks:
+      - autobook-network
+
+  # Kafka and Zookeeper
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - autobook-network
+
+  kafka:
+    image: bitnami/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    depends_on:
+      - zookeeper
+    networks:
+      - autobook-network
+
+  # Python Service for Image and Text Generation
+  python-service:
+    build:
+      context: ./python-service
+      dockerfile: Dockerfile
+    container_name: python-service
+    ports:
+      - "5000:5000"
+    environment:
+      - NVIDIA_API_KEY=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
+    volumes:
+      - python-uploads:/app/uploads
+    networks:
+      - autobook-network
+
+  # Spring Boot Services
   service-registry:
     build: ./service-registry
+    container_name: service-registry
     ports:
       - "8761:8761"
     networks:
@@ -10,107 +70,121 @@ services:
 
   api-gateway:
     build: ./api-gateway
+    container_name: api-gateway
     ports:
       - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
     depends_on:
       - service-registry
-    environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
     networks:
       - autobook-network
 
   user-service:
     build: ./user-service
+    container_name: user-service
     ports:
       - "8081:8081"
-    depends_on:
-      - service-registry
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/autobook_user_db
-      - SPRING_DATASOURCE_USERNAME=user
-      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/autobook_user_db
       - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
+    depends_on:
+      - postgres
+      - service-registry
     networks:
       - autobook-network
 
   conversation-service:
     build: ./conversation-service
+    container_name: conversation-service
     ports:
       - "8082:8082"
-    depends_on:
-      - service-registry
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/autobook_conversation_db
-      - SPRING_DATASOURCE_USERNAME=user
-      - SPRING_DATASOURCE_PASSWORD=password
-      - SPRING_KAFKA_BOOTSTRAP_SERVERS=host.docker.internal:9092
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/autobook_conversation_db
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
+    depends_on:
+      - postgres
+      - kafka
+      - service-registry
     networks:
       - autobook-network
 
   book-generation-service:
     build: ./book-generation-service
+    container_name: book-generation-service
     ports:
       - "8083:8083"
-    depends_on:
-      - service-registry
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/autobook_book_db
-      - SPRING_DATASOURCE_USERNAME=user
-      - SPRING_DATASOURCE_PASSWORD=password
-      - SPRING_KAFKA_BOOTSTRAP_SERVERS=host.docker.internal:9092
-      - OLLAMA_API_URL=http://host.docker.internal:11434
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/autobook_book_db
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - PYTHON_SERVICE_URL=http://python-service:5000
       - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
-    volumes:
-      - book-data:/app/uploads
+    depends_on:
+      - postgres
+      - kafka
+      - python-service
+      - service-registry
     networks:
       - autobook-network
 
   image-service:
     build: ./image-service
+    container_name: image-service
     ports:
       - "8084:8084"
-    depends_on:
-      - service-registry
     environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - PYTHON_SERVICE_URL=http://python-service:5000
       - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
+    depends_on:
+      - python-service
+      - service-registry
     volumes:
-      - image-data:/app/uploads
+      - image-uploads:/app/uploads/images
     networks:
       - autobook-network
 
   pdf-service:
     build: ./pdf-service
+    container_name: pdf-service
     ports:
       - "8085:8085"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
     depends_on:
       - service-registry
-    environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
     volumes:
-      - pdf-data:/app/uploads
+      - pdf-uploads:/app/uploads
     networks:
       - autobook-network
 
   collection-service:
     build: ./collection-service
+    container_name: collection-service
     ports:
       - "8086:8086"
-    depends_on:
-      - service-registry
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/autobook_collection_db
-      - SPRING_DATASOURCE_USERNAME=user
-      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/autobook_collection_db
       - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
+    depends_on:
+      - postgres
+      - service-registry
     networks:
       - autobook-network
-
-volumes:
-  book-data:
-  image-data:
-  pdf-data:
 
 networks:
   autobook-network:
     driver: bridge
+
+volumes:
+  postgres-data:
+  python-uploads:
+  image-uploads:
+  pdf-uploads:

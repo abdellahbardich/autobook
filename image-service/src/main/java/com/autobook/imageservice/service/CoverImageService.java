@@ -1,6 +1,6 @@
 package com.autobook.imageservice.service;
 
-import com.autobook.imageservice.client.FreepikClient;
+import com.autobook.imageservice.client.ConsistoryClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,18 +20,19 @@ import java.util.UUID;
 @Slf4j
 public class CoverImageService {
 
-    private final FreepikClient freepikClient;
+    private final ConsistoryClient consistoryClient;
 
     public Map<String, String> generateCoverImage(String title, String style) {
         try {
-            // Generate and download the base image using FreepikClient
-            String imagePath = freepikClient.generateAndDownloadImage(title, style);
+            // Generate cover image using Consistory API
+            String imagePath = consistoryClient.generateCoverImage(title, style);
+
             if (imagePath == null) {
-                log.error("Failed to download base image for cover");
+                log.error("Failed to generate cover image for title: {}", title);
                 throw new RuntimeException("Failed to generate cover image");
             }
 
-            // Add the title overlay
+            // Add text overlay if needed (Consistory might not add text reliably)
             String outputPath = addTextOverlay(imagePath, title);
 
             Map<String, String> result = new HashMap<>();

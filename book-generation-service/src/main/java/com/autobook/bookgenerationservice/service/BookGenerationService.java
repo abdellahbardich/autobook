@@ -1,7 +1,7 @@
 package com.autobook.bookgenerationservice.service;
 
+import com.autobook.bookgenerationservice.client.GeminiClient;
 import com.autobook.bookgenerationservice.client.ImageServiceClient;
-import com.autobook.bookgenerationservice.client.OllamaClient;
 import com.autobook.bookgenerationservice.client.PdfServiceClient;
 import com.autobook.bookgenerationservice.dto.BookDto;
 import com.autobook.bookgenerationservice.entity.Book;
@@ -28,7 +28,7 @@ public class BookGenerationService {
 
     private final BookRepository bookRepository;
     private final BookContentRepository bookContentRepository;
-    private final OllamaClient ollamaClient;
+    private final GeminiClient geminiClient;
     private final ImageServiceClient imageServiceClient;
     private final PdfServiceClient pdfServiceClient;
     private final KafkaTemplate<String, Object> kafkaTemplate;
@@ -76,12 +76,15 @@ public class BookGenerationService {
             book.setStatus(Book.BookStatus.PROCESSING);
             book = bookRepository.save(book);
 
+            // Generate summary using Gemini
             String summary = generateBookSummary(request.getPrompt(), request.getTitle());
             book.setSummary(summary);
             bookRepository.save(book);
 
+            // Generate chapters
             List<BookContent> chapters = generateChapters(book, request.getPrompt(), request.getNumChapters());
 
+            // Generate cover image
             Map<String, String> coverRequest = new HashMap<>();
             coverRequest.put("title", request.getTitle());
             coverRequest.put("style", request.getStylePrompt());
@@ -89,10 +92,12 @@ public class BookGenerationService {
             Map<String, String> coverResponse = imageServiceClient.generateCoverImage(coverRequest);
             book.setCoverImagePath(coverResponse.get("coverImagePath"));
 
+            // Generate illustrations if needed
             if (request.isIncludeIllustrations() && request.getBookType() == Book.BookType.TEXT_IMAGE) {
                 generateIllustrations(book, chapters, request.getStylePrompt());
             }
 
+            // Generate PDF
             Map<String, Object> pdfRequest = new HashMap<>();
             pdfRequest.put("bookId", book.getBookId());
             pdfRequest.put("title", book.getTitle());
@@ -104,9 +109,11 @@ public class BookGenerationService {
             Map<String, String> pdfResponse = pdfServiceClient.generatePdf(pdfRequest);
             book.setPdfPath(pdfResponse.get("pdfPath"));
 
+            // Generate preview image
             Map<String, String> previewResponse = pdfServiceClient.generatePreviewImage(book.getPdfPath());
             book.setPreviewImagePath(previewResponse.get("previewImagePath"));
 
+            // Update book status to complete
             book.setStatus(Book.BookStatus.COMPLETE);
             bookRepository.save(book);
 
@@ -124,7 +131,7 @@ public class BookGenerationService {
                 title, prompt
         );
 
-        return ollamaClient.generateText(summaryPrompt);
+        return geminiClient.generateText(summaryPrompt);
     }
 
     private List<BookContent> generateChapters(Book book, String prompt, int numChapters) {
@@ -137,7 +144,7 @@ public class BookGenerationService {
                 numChapters, book.getTitle(), prompt
         );
 
-        String chapterTitlesResponse = ollamaClient.generateText(chapterTitlesPrompt);
+        String chapterTitlesResponse = geminiClient.generateText(chapterTitlesPrompt);
         String[] chapterTitles = chapterTitlesResponse.split("\n");
 
         // Then generate content for each chapter
@@ -150,7 +157,7 @@ public class BookGenerationService {
                     i + 1, chapterTitle, book.getTitle(), prompt
             );
 
-            String chapterContent = ollamaClient.generateText(chapterContentPrompt);
+            String chapterContent = geminiClient.generateText(chapterContentPrompt);
 
             BookContent chapter = new BookContent();
             chapter.setBook(book);

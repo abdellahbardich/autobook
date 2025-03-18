@@ -5,11 +5,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -27,46 +24,17 @@ public class IllustrationService {
                 throw new IllegalArgumentException("Prompt is required for illustration generation");
             }
 
-            String subjectPrompt = extractSubjectFromPrompt(prompt);
+            // Generate illustrations using Consistory API
+            List<Map<String, String>> illustrations = consistoryClient.generateIllustrations(prompt, style);
 
-            List<String> subjectTokens = extractSubjectTokens(subjectPrompt);
+            if (illustrations.isEmpty()) {
+                log.warn("No illustrations were generated for prompt: {}", prompt);
+            }
 
-            String scenePrompt1 = prompt;
-            String scenePrompt2 = style != null ?
-                    prompt + " in " + style + " style" : prompt;
-
-            List<String> imagePaths = consistoryClient.generateConsistentImages(
-                    subjectPrompt, subjectTokens, style, scenePrompt1, scenePrompt2);
-
-            return imagePaths.stream()
-                    .map(path -> Map.of("illustrationPath", path))
-                    .collect(Collectors.toList());
-
+            return illustrations;
         } catch (Exception e) {
             log.error("Error generating illustrations", e);
             throw new RuntimeException("Failed to generate illustrations", e);
         }
-    }
-
-    private String extractSubjectFromPrompt(String prompt) {
-        String[] words = prompt.split("\\s+");
-        List<String> nouns = new ArrayList<>();
-
-        for (String word : words) {
-            if (word.length() > 1 && Character.isUpperCase(word.charAt(0))) {
-                nouns.add(word.replaceAll("[^a-zA-Z]", ""));
-            }
-        }
-
-        if (!nouns.isEmpty()) {
-            return String.join(" ", nouns);
-        }
-
-        int endIndex = Math.min(10, words.length);
-        return String.join(" ", Arrays.copyOfRange(words, 0, endIndex));
-    }
-
-    private List<String> extractSubjectTokens(String subjectPrompt) {
-        return Arrays.asList(subjectPrompt.split("\\s+"));
     }
 }
