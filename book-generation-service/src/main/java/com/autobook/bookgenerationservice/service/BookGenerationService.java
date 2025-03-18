@@ -11,6 +11,7 @@ import com.autobook.bookgenerationservice.repository.BookRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,9 +31,11 @@ public class BookGenerationService {
     private final OllamaClient ollamaClient;
     private final ImageServiceClient imageServiceClient;
     private final PdfServiceClient pdfServiceClient;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
     @Transactional
     public BookDto.BookResponse createBook(BookDto.BookCreationRequest request) {
+        // Create book in database
         Book book = new Book();
         book.setConversationId(request.getConversationId());
         book.setMessageId(request.getMessageId());
@@ -40,10 +43,13 @@ public class BookGenerationService {
         book.setBookType(request.getBookType());
         book.setStyle(request.getStylePrompt());
         book.setStatus(Book.BookStatus.PROCESSING);
-
         Book savedBook = bookRepository.save(book);
 
+        // Send message to Kafka to trigger processing
+        log.info("Sending book generation request to Kafka for book ID: {}", savedBook.getBookId());
+        kafkaTemplate.send("book-generation-requests", savedBook.getBookId().toString(), request);
 
+        // Return response
         return new BookDto.BookResponse(
                 savedBook.getBookId(),
                 savedBook.getTitle(),
@@ -60,6 +66,7 @@ public class BookGenerationService {
         try {
             log.info("Received book generation request for title: {}", request.getTitle());
 
+            // Create a new book from the request
             Book book = new Book();
             book.setConversationId(request.getConversationId());
             book.setMessageId(request.getMessageId());
@@ -123,6 +130,7 @@ public class BookGenerationService {
     private List<BookContent> generateChapters(Book book, String prompt, int numChapters) {
         List<BookContent> chapters = new ArrayList<>();
 
+        // First, generate chapter titles
         String chapterTitlesPrompt = String.format(
                 "Create %d chapter titles for a book titled '%s' based on this prompt: %s. " +
                         "Return only the chapter numbers and titles in the format: 1. Title",
@@ -132,6 +140,7 @@ public class BookGenerationService {
         String chapterTitlesResponse = ollamaClient.generateText(chapterTitlesPrompt);
         String[] chapterTitles = chapterTitlesResponse.split("\n");
 
+        // Then generate content for each chapter
         for (int i = 0; i < numChapters && i < chapterTitles.length; i++) {
             String chapterTitle = chapterTitles[i].replaceAll("^\\d+\\.\\s*", "").trim();
 
@@ -257,5 +266,4 @@ public class BookGenerationService {
         return bookRepository.findById(bookId)
                 .orElseThrow(() -> new RuntimeException("Book not found with ID: " + bookId));
     }
-
 }
