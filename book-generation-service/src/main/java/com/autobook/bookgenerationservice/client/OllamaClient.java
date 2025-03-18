@@ -1,96 +1,63 @@
 package com.autobook.bookgenerationservice.client;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.Arrays;
-import java.util.Collections;
+import java.util.List;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class OllamaClient {
 
-    private final RestTemplate restTemplate;
-    private final ObjectMapper objectMapper;
+    // You can configure the CLI command and model via application.properties if desired.
+    @Value("${ollama.cli.command:ollama}")
+    private String ollamaCommand; // defaults to "ollama"
 
-    @Value("${ollama.api.url}")
-    private String ollamaApiUrl;
+    @Value("${ollama.model:llama3.2}")
+    private String model; // defaults to "llama3.2"
 
-    @PostConstruct
-    public void init() {
-        // Add support for ndjson content type
-        MappingJackson2HttpMessageConverter converter = new MappingJackson2HttpMessageConverter();
-        converter.setSupportedMediaTypes(
-                Arrays.asList(MediaType.APPLICATION_JSON,
-                        MediaType.valueOf("application/x-ndjson")));
-        restTemplate.getMessageConverters().add(0, converter);
-    }
-
+    /**
+     * Generates text using the Ollama CLI.
+     *
+     * @param prompt The text prompt for Ollama.
+     * @return The full generated response as a string.
+     */
     public String generateText(String prompt) {
         try {
-            log.info("Generating text with Ollama for prompt: {}",
-                    prompt.length() > 100 ? prompt.substring(0, 100) + "..." : prompt);
+            // Build the command: e.g. "ollama run llama3.2 <prompt>"
+            List<String> command = Arrays.asList(ollamaCommand, "run", model, prompt);
+            log.info("Executing command: {}", command);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setAccept(Collections.singletonList(MediaType.valueOf("application/x-ndjson")));
+            ProcessBuilder processBuilder = new ProcessBuilder(command);
+            // Redirect error stream so that stderr is merged with stdout.
+            processBuilder.redirectErrorStream(true);
+            Process process = processBuilder.start();
 
-            OllamaRequest request = new OllamaRequest();
-            request.setModel("llama3.2");
-            request.setPrompt(prompt);
-
-            HttpEntity<OllamaRequest> entity = new HttpEntity<>(request, headers);
-
-            String response = restTemplate.postForObject(
-                    ollamaApiUrl + "/api/generate",
-                    entity,
-                    String.class
-            );
-
-            // For ndjson format, we need to parse the last line to get the final response
-            if (response != null && !response.isEmpty()) {
-                String[] lines = response.split("\n");
-                String lastLine = lines[lines.length - 1];
-                OllamaResponse ollamaResponse = objectMapper.readValue(lastLine, OllamaResponse.class);
-                return ollamaResponse.getResponse();
+            // Read the entire output of the CLI process.
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            StringBuilder output = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append(System.lineSeparator());
             }
 
-            // If Ollama is not available, generate a mock response for testing
-            return "This is a mock response for: " + prompt;
+            // Wait until the process completes.
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                log.error("Ollama CLI returned non-zero exit code: {}", exitCode);
+                return "Error: CLI exited with code " + exitCode;
+            }
 
+            String response = output.toString().trim();
+            log.info("Received full response from Ollama CLI: {}", response);
+            return response;
         } catch (Exception e) {
-            log.error("Error generating text with Ollama: {}", e.getMessage());
-            // Return a mock response for testing if Ollama is not working
-            return "Error occurred, but here is a mock response for: " + prompt;
+            log.error("Error generating text with Ollama CLI", e);
+            return "Error generating text: " + e.getMessage();
         }
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class OllamaRequest {
-        private String model;
-        private String prompt;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class OllamaResponse {
-        private String model;
-        private String response;
     }
 }
