@@ -11,7 +11,7 @@
 	<groupId>com.autobook</groupId>
 	<artifactId>pdf-service</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<n>pdf-service</n>
+	<name>pdf-service</name>
 	<description>PDF Service for AutoBook Generator</description>
 
 	<properties>

@@ -11,7 +11,7 @@
     <groupId>com.autobook</groupId>
     <artifactId>book-generation-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <n>book-generation-service</n>
+    <name>book-generation-service</name>
     <description>Book Generation Service for AutoBook Generator</description>
 
     <properties>
