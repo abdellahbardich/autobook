@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
-import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -37,8 +36,15 @@ public class PdfGeneratorService {
     @Value("${preview.upload.dir}")
     private String previewUploadDir;
 
+    // Base directory for all uploads
+    private static final String BASE_UPLOAD_DIR = "C:\\Users\\Youcode\\Desktop\\autobook\\s3\\uploads";
+    private static final String IMAGES_DIR = "images";
+    private static final String PDFS_DIR = "pdfs";
+    private static final String PREVIEWS_DIR = "previews";
+
     @SuppressWarnings("unchecked")
     public Map<String, String> generatePdf(Map<String, Object> request) {
+        PDDocument document = null;
         try {
             // Safely convert bookId to Long regardless of whether it's Integer or Long
             Long bookId = null;
@@ -52,7 +58,6 @@ public class PdfGeneratorService {
             } else if (bookIdObj != null) {
                 bookId = Long.valueOf(bookIdObj.toString());
             }
-
             if (bookId == null) {
                 throw new IllegalArgumentException("Book ID is required and must be a number");
             }
@@ -64,14 +69,22 @@ public class PdfGeneratorService {
             List<Map<String, Object>> chapters = (List<Map<String, Object>>) request.get("chapters");
             String bookType = (String) request.get("bookType");
 
-            // Normalize file paths - ensure they use proper directory separators for the OS
-            coverImagePath = normalizePath(coverImagePath);
+            // Log original paths for debugging
+            log.info("Original cover image path: {}", coverImagePath);
+
+            // Resolve full paths for cover image
+            coverImagePath = resolveImagePath(coverImagePath);
+            log.info("Resolved cover image path: {}", coverImagePath);
+
+            // Normalize illustration paths in chapters
             if (chapters != null) {
                 for (Map<String, Object> chapter : chapters) {
                     if (chapter.containsKey("illustrationPath")) {
                         String illPath = (String) chapter.get("illustrationPath");
                         if (illPath != null) {
-                            chapter.put("illustrationPath", normalizePath(illPath));
+                            String resolvedPath = resolveImagePath(illPath);
+                            chapter.put("illustrationPath", resolvedPath);
+                            log.info("Resolved illustration path from '{}' to '{}'", illPath, resolvedPath);
                         }
                     }
                 }
@@ -84,10 +97,11 @@ public class PdfGeneratorService {
             }
 
             // Create PDF document
-            PDDocument document = new PDDocument();
+            document = new PDDocument();
 
             // Add cover page with title overlay
             if (coverImagePath != null && fileExists(coverImagePath)) {
+                log.info("Using cover image at path: {}", coverImagePath);
                 addFullPageCoverWithText(document, coverImagePath, title);
             } else {
                 log.warn("Cover image not found at path: {}. Using placeholder instead.", coverImagePath);
@@ -106,22 +120,29 @@ public class PdfGeneratorService {
             String pdfFilename = "book_" + bookId + "_" + UUID.randomUUID() + ".pdf";
             Path pdfPath = pdfDir.resolve(pdfFilename);
             document.save(pdfPath.toFile());
-            document.close();
-
             log.info("Generated PDF: {}", pdfPath);
 
             // Return path to the PDF
             Map<String, String> result = new HashMap<>();
             result.put("pdfPath", pdfPath.toString());
-
             return result;
         } catch (Exception e) {
             log.error("Error generating PDF", e);
             throw new RuntimeException("Failed to generate PDF", e);
+        } finally {
+            // Always ensure the document is closed
+            if (document != null) {
+                try {
+                    document.close();
+                } catch (IOException e) {
+                    log.error("Error closing PDF document", e);
+                }
+            }
         }
     }
 
     public Map<String, String> generatePreviewImage(String pdfPath) {
+        PDDocument document = null;
         try {
             // Ensure preview directory exists
             Path previewDir = Paths.get(previewUploadDir);
@@ -129,8 +150,9 @@ public class PdfGeneratorService {
                 Files.createDirectories(previewDir);
             }
 
-            // Normalize path
-            pdfPath = normalizePath(pdfPath);
+            // Get the properly resolved path to the PDF
+            pdfPath = resolveCompletePdfPath(pdfPath);
+            log.info("Resolved PDF path for preview generation: {}", pdfPath);
 
             // Check if PDF file exists
             if (!fileExists(pdfPath)) {
@@ -139,7 +161,7 @@ public class PdfGeneratorService {
             }
 
             // Open the PDF
-            PDDocument document = PDDocument.load(new File(pdfPath));
+            document = PDDocument.load(new File(pdfPath));
 
             // Render the first page as an image
             PDFRenderer renderer = new PDFRenderer(document);
@@ -149,20 +171,95 @@ public class PdfGeneratorService {
             String previewFilename = "preview_" + UUID.randomUUID() + ".png";
             Path previewPath = previewDir.resolve(previewFilename);
             ImageIO.write(image, "PNG", previewPath.toFile());
-
-            document.close();
-
             log.info("Generated preview image: {}", previewPath);
 
             // Return the path to the preview image
             Map<String, String> result = new HashMap<>();
             result.put("previewImagePath", previewPath.toString());
-
             return result;
         } catch (IOException e) {
             log.error("Error generating preview image", e);
             throw new RuntimeException("Failed to generate preview image", e);
+        } finally {
+            // Always ensure the document is closed
+            if (document != null) {
+                try {
+                    document.close();
+                } catch (IOException e) {
+                    log.error("Error closing PDF document", e);
+                }
+            }
         }
+    }
+
+    /**
+     * Resolve image paths (cover images and illustrations)
+     */
+    private String resolveImagePath(String imagePath) {
+        if (imagePath == null) return null;
+
+        // Remove any leading slashes for consistency
+        imagePath = imagePath.replaceAll("^/+", "");
+
+        // Extract just the filename if it's just a filename
+        String filename = Paths.get(imagePath).getFileName().toString();
+
+        // Check if the path already contains "uploads/images" or similar pattern
+        if (imagePath.contains("uploads/images") || imagePath.contains("uploads\\images")) {
+            // This is already a relative path with the correct structure
+            // Convert to absolute path for loading
+            return Paths.get(BASE_UPLOAD_DIR, imagePath.replace("uploads/", "").replace("uploads\\", "")).toString();
+        }
+
+        // If it's just a filename without path (e.g., "cover_123.png")
+        if (!imagePath.contains("/") && !imagePath.contains("\\")) {
+            return Paths.get(BASE_UPLOAD_DIR, IMAGES_DIR, filename).toString();
+        }
+
+        // If it's a full Windows path, use it directly
+        if (imagePath.matches("^[A-Za-z]:.*")) {
+            return imagePath;
+        }
+
+        // For any other case, try to make a reasonable guess
+        return Paths.get(BASE_UPLOAD_DIR, IMAGES_DIR, filename).toString();
+    }
+
+    /**
+     * Resolve a complete path to the PDF, handling both filenames and full paths
+     */
+    private String resolveCompletePdfPath(String pdfPath) {
+        if (pdfPath == null) return null;
+
+        // Extract just the filename
+        String filename = Paths.get(pdfPath).getFileName().toString();
+
+        // If this is just a filename (no path separators), prepend the PDF upload directory
+        if (!pdfPath.contains("/") && !pdfPath.contains("\\")) {
+            Path fullPath = Paths.get(BASE_UPLOAD_DIR, PDFS_DIR, filename);
+            log.info("Converting filename '{}' to full path: '{}'", pdfPath, fullPath);
+            return fullPath.toString();
+        }
+
+        // If it's a full Windows path, use it directly
+        if (pdfPath.matches("^[A-Za-z]:.*")) {
+            return pdfPath;
+        }
+
+        // If it contains "uploads/pdfs" or similar
+        if (pdfPath.contains("uploads/pdfs") || pdfPath.contains("uploads\\pdfs")) {
+            return Paths.get(BASE_UPLOAD_DIR, pdfPath.replace("uploads/", "").replace("uploads\\", "")).toString();
+        }
+
+        // If it's a relative path but not just a filename
+        if (!pdfPath.startsWith("/") && !pdfPath.matches("^[A-Za-z]:.*")) {
+            Path fullPath = Paths.get(BASE_UPLOAD_DIR, pdfPath);
+            log.info("Converting relative path '{}' to full path: '{}'", pdfPath, fullPath);
+            return fullPath.toString();
+        }
+
+        // It's already a full path
+        return pdfPath;
     }
 
     /**
@@ -179,8 +276,14 @@ public class PdfGeneratorService {
                 imageFile.exists(), imageFile.canRead(),
                 imageFile.exists() ? imageFile.length() : 0);
 
-        PDImageXObject coverImage = PDImageXObject.createFromFile(coverImagePath, document);
+        // Validate the file is accessible before proceeding
+        if (!imageFile.exists() || !imageFile.canRead()) {
+            log.warn("Cannot access cover image at: {}", coverImagePath);
+            addPlaceholderCover(document, title);
+            return;
+        }
 
+        PDImageXObject coverImage = PDImageXObject.createFromFile(coverImagePath, document);
         try (PDPageContentStream contentStream = new PDPageContentStream(document, coverPage)) {
             float pageWidth = coverPage.getMediaBox().getWidth();
             float pageHeight = coverPage.getMediaBox().getHeight();
@@ -203,14 +306,14 @@ public class PdfGeneratorService {
             float titleY = 100; // Position near the bottom of the page
 
             // Add semi-transparent background rectangle for better text readability
-            contentStream.setNonStrokingColor(0, 0, 0, 0.5f); // Semi-transparent black
+            contentStream.setNonStrokingColor(0.2f, 0.2f, 0.2f, 0.6f); // Semi-transparent dark gray
             contentStream.addRect(titleX - 10, titleY - 10, titleWidth + 20, titleFontSize + 20);
             contentStream.fill();
 
             // Draw title text
             contentStream.beginText();
             contentStream.setFont(titleFont, titleFontSize);
-            contentStream.setNonStrokingColor(255, 255, 255); // White text
+            contentStream.setNonStrokingColor(1f, 1f, 1f); // White text
             contentStream.newLineAtOffset(titleX, titleY);
             contentStream.showText(displayTitle);
             contentStream.endText();
@@ -220,13 +323,12 @@ public class PdfGeneratorService {
     private void addPlaceholderCover(PDDocument document, String title) throws IOException {
         PDPage coverPage = new PDPage(PDRectangle.A4);
         document.addPage(coverPage);
-
         try (PDPageContentStream contentStream = new PDPageContentStream(document, coverPage)) {
             float pageWidth = coverPage.getMediaBox().getWidth();
             float pageHeight = coverPage.getMediaBox().getHeight();
 
             // Draw a colored rectangle as background
-            contentStream.setNonStrokingColor(230, 230, 250); // Light lavender
+            contentStream.setNonStrokingColor(230/255f, 230/255f, 250/255f); // Light lavender
             contentStream.addRect(0, 0, pageWidth, pageHeight);
             contentStream.fill();
 
@@ -247,9 +349,7 @@ public class PdfGeneratorService {
             // Draw title with shadow effect
             contentStream.beginText();
             contentStream.setFont(titleFont, titleFontSize);
-
-            // Shadow
-            contentStream.setNonStrokingColor(100, 100, 100);
+            contentStream.setNonStrokingColor(100/255f, 100/255f, 100/255f);
             contentStream.newLineAtOffset(titleX + 2, titleY - 2);
             contentStream.showText(displayTitle);
             contentStream.endText();
@@ -257,7 +357,7 @@ public class PdfGeneratorService {
             // Main text
             contentStream.beginText();
             contentStream.setFont(titleFont, titleFontSize);
-            contentStream.setNonStrokingColor(0, 0, 0);
+            contentStream.setNonStrokingColor(0f, 0f, 0f);
             contentStream.newLineAtOffset(titleX, titleY);
             contentStream.showText(displayTitle);
             contentStream.endText();
@@ -272,7 +372,7 @@ public class PdfGeneratorService {
 
             contentStream.beginText();
             contentStream.setFont(noteFont, noteFontSize);
-            contentStream.setNonStrokingColor(100, 100, 100);
+            contentStream.setNonStrokingColor(100/255f, 100/255f, 100/255f);
             contentStream.newLineAtOffset(noteX, noteY);
             contentStream.showText(noteText);
             contentStream.endText();
@@ -282,7 +382,6 @@ public class PdfGeneratorService {
     private void addTitlePage(PDDocument document, String title, String summary) throws IOException {
         PDPage titlePage = new PDPage(PDRectangle.A4);
         document.addPage(titlePage);
-
         PDFont titleFont = PDType1Font.HELVETICA_BOLD;
         PDFont textFont = PDType1Font.HELVETICA;
 
@@ -331,7 +430,6 @@ public class PdfGeneratorService {
             } else if (numObj != null) {
                 chapterNumber = Integer.parseInt(numObj.toString());
             }
-
             if (chapterNumber == null) {
                 chapterNumber = 0; // Default chapter number if missing
             }
@@ -340,8 +438,16 @@ public class PdfGeneratorService {
             String chapterContent = (String) chapter.get("chapterContent");
             String illustrationPath = (String) chapter.get("illustrationPath");
 
+            // Log the illustration path for debugging
+            log.info("Chapter {} illustration path: {}", chapterNumber, illustrationPath);
+
             // Check if we have a valid illustration to use as background
             boolean hasIllustration = includeIllustrations && illustrationPath != null && fileExists(illustrationPath);
+            if (hasIllustration) {
+                log.info("Confirmed illustration exists at: {}", illustrationPath);
+            } else if (illustrationPath != null) {
+                log.warn("Illustration file not found at: {}", illustrationPath);
+            }
 
             PDPage chapterPage = new PDPage(PDRectangle.A4);
             document.addPage(chapterPage);
@@ -350,21 +456,49 @@ public class PdfGeneratorService {
                 float pageWidth = chapterPage.getMediaBox().getWidth();
                 float pageHeight = chapterPage.getMediaBox().getHeight();
 
-                // If we have an illustration, use it as a full-page background
+                // If we have an illustration, add it on its own page
                 if (hasIllustration) {
                     try {
-                        PDImageXObject illustration = PDImageXObject.createFromFile(illustrationPath, document);
-                        contentStream.drawImage(illustration, 0, 0, pageWidth, pageHeight);
+                        // Create a separate page for the illustration
+                        PDPage illustrationPage = new PDPage(PDRectangle.A4);
+                        document.addPage(illustrationPage);
 
-                        // Add semi-transparent overlay for text readability
-                        contentStream.setNonStrokingColor(255, 255, 255, 0.7f); // Semi-transparent white
-                        contentStream.addRect(30, 30, pageWidth - 60, pageHeight - 60);
-                        contentStream.fill();
+                        try (PDPageContentStream illContentStream = new PDPageContentStream(document, illustrationPage)) {
+                            log.info("Loading illustration from: {}", illustrationPath);
+                            PDImageXObject illustration = PDImageXObject.createFromFile(illustrationPath, document);
+                            illContentStream.drawImage(illustration, 0, 0, pageWidth, pageHeight);
+
+                            // Add a small caption at the bottom if desired
+                            float captionY = 20;
+                            String caption = "Illustration for Chapter " + chapterNumber;
+
+                            // Add the caption with a light background
+                            float captionWidth = textFont.getStringWidth(caption) / 1000 * 10;
+                            float captionX = (pageWidth - captionWidth) / 2;
+
+                            // Light background for the caption
+                            illContentStream.setNonStrokingColor(1f, 1f, 1f, 0.7f);
+                            illContentStream.addRect(captionX - 5, captionY - 5, captionWidth + 10, 15);
+                            illContentStream.fill();
+
+                            // Caption text
+                            illContentStream.beginText();
+                            illContentStream.setFont(textFont, 10);
+                            illContentStream.setNonStrokingColor(0f, 0f, 0f);
+                            illContentStream.newLineAtOffset(captionX, captionY);
+                            illContentStream.showText(caption);
+                            illContentStream.endText();
+                        }
                     } catch (Exception e) {
                         log.warn("Failed to add illustration to chapter {}: {}", chapterNumber, e.getMessage());
                         hasIllustration = false;
                     }
                 }
+
+                // Plain white background for text
+                contentStream.setNonStrokingColor(1f, 1f, 1f);
+                contentStream.addRect(0, 0, pageWidth, pageHeight);
+                contentStream.fill();
 
                 // Chapter number
                 String chapterText = "Chapter " + chapterNumber;
@@ -375,7 +509,7 @@ public class PdfGeneratorService {
 
                 contentStream.beginText();
                 contentStream.setFont(chapterTitleFont, chapterNumFontSize);
-                contentStream.setNonStrokingColor(0, 0, 0); // Black text
+                contentStream.setNonStrokingColor(0f, 0f, 0f); // Black text
                 contentStream.newLineAtOffset(chapterNumX, chapterNumY);
                 contentStream.showText(chapterText);
                 contentStream.endText();
@@ -411,14 +545,12 @@ public class PdfGeneratorService {
                                 float leading) throws IOException {
         String[] paragraphs = text.split("\n\n");
         float currentY = startY;
-
         contentStream.setFont(font, fontSize);
-        contentStream.setNonStrokingColor(0, 0, 0); // Ensure text is black
+        contentStream.setNonStrokingColor(0f, 0f, 0f); // Ensure text is black
 
         for (String paragraph : paragraphs) {
             String[] words = paragraph.split("\\s+");
             StringBuilder line = new StringBuilder();
-
             contentStream.beginText();
             contentStream.newLineAtOffset(startX, currentY);
 
@@ -444,28 +576,20 @@ public class PdfGeneratorService {
             }
 
             contentStream.endText();
-
             currentY -= leading * 2;
 
             // If we're too close to the bottom, create a new page
             if (currentY < 50) {
-                // Close current content stream
-                contentStream.close();
-
                 // Create new page
                 PDPage newPage = new PDPage(PDRectangle.A4);
                 document.addPage(newPage);
 
-                // Create new content stream for the new page
+                // Create a new content stream for the new page
                 PDPageContentStream newContentStream = new PDPageContentStream(document, newPage);
                 newContentStream.setFont(font, fontSize);
-                newContentStream.setNonStrokingColor(0, 0, 0); // Ensure text is black
-
-                // Reset Y position to top of page
-                currentY = newPage.getMediaBox().getHeight() - 50;
-
-                // Use the new content stream for remaining text
-                return; // Exit this method as we can't continue with the closed stream
+                newContentStream.setNonStrokingColor(0f, 0f, 0f); // Ensure text is black
+                newContentStream.close();
+                return;
             }
         }
     }
@@ -477,37 +601,14 @@ public class PdfGeneratorService {
         if (filePath == null) return false;
 
         File file = new File(filePath);
-        return file.exists() && file.isFile() && file.canRead();
-    }
+        boolean exists = file.exists() && file.isFile() && file.canRead();
 
-    /**
-     * Normalize file paths to ensure compatibility with the operating system
-     */
-    private String normalizePath(String path) {
-        if (path == null) return null;
-
-        // Replace backslashes with forward slashes for consistency
-        path = path.replace('\\', '/');
-
-        // If the path doesn't start with a drive letter (Windows) or / (Unix),
-        // assume it's relative and make it absolute
-        if (!path.matches("^[A-Za-z]:.*") && !path.startsWith("/")) {
-            // This is a relative path - check if it exists directly or needs conversion
-            File directFile = new File(path);
-            if (directFile.exists()) {
-                return directFile.getAbsolutePath();
-            }
-
-            // Try to resolve with the application's working directory
-            File workingDirFile = new File(System.getProperty("user.dir"), path);
-            if (workingDirFile.exists()) {
-                return workingDirFile.getAbsolutePath();
-            }
-
-            // Return as is - it will be checked for existence later
-            return path;
+        // Log detailed file info for debugging
+        if (!exists) {
+            log.debug("File check failed. Path: {}, Exists: {}, IsFile: {}, Readable: {}",
+                    filePath, file.exists(), file.exists() && file.isFile(), file.exists() && file.canRead());
         }
 
-        return path;
+        return exists;
     }
 }
