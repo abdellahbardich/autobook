@@ -34,13 +34,11 @@ public class BookController {
     public ResponseEntity<Resource> getIllustrationImage(
             @PathVariable("path") String path) {
         try {
-            // Sanitize and validate the path
             if (path.contains("..") || path.contains(":\\")) {
                 log.error("Potentially unsafe path requested: {}", path);
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
             }
 
-            // Always use the uploads directory for illustrations
             String fullPath = UPLOAD_DIR + path;
             log.info("Attempting to serve illustration from path: {}", fullPath);
 
@@ -63,7 +61,6 @@ public class BookController {
     @GetMapping("/file")
     public ResponseEntity<Resource> getFileByPath(@RequestParam("path") String filePath) {
         try {
-            // Validate the file path for security
             if (filePath.contains("..") || !isAuthorizedPath(filePath)) {
                 log.error("Unauthorized file path requested: {}", filePath);
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
@@ -87,7 +84,6 @@ public class BookController {
         }
     }
 
-    // Helper method to determine media type
     private MediaType determineMediaType(String filename) {
         filename = filename.toLowerCase();
         if (filename.endsWith(".pdf")) {
@@ -101,9 +97,7 @@ public class BookController {
         }
     }
 
-    // Helper method to validate path is in authorized directories
     private boolean isAuthorizedPath(String path) {
-        // Allow only paths in certain directories
         return path.startsWith(UPLOAD_DIR) ||
                 path.startsWith("books/") ||
                 path.startsWith("pdfs/");
@@ -160,19 +154,15 @@ public class BookController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
             }
 
-            // Determine the filename: if the received path is "download", fallback to using the book entity's PDF path.
             String fileName;
             if ("download".equalsIgnoreCase(receivedPath)) {
-                // Fallback: retrieve the full PDF path from the book entity.
                 Book bookEntity = bookGenerationService.getBookEntity(bookId);
                 fileName = Paths.get(bookEntity.getPdfPath()).getFileName().toString();
             } else {
                 fileName = Paths.get(receivedPath).getFileName().toString();
             }
 
-            // Define the fixed base directory.
             String baseDir = "C:\\Users\\Youcode\\Desktop\\autobook\\s3\\uploads\\pdfs";
-            // Build the full path.
             String pdfPath = Paths.get(baseDir, fileName).toString();
 
             log.info("Attempting to download PDF from path: {}", pdfPath);
@@ -212,7 +202,6 @@ public class BookController {
                 return ResponseEntity.notFound().build();
             }
 
-            // Determine the filename: if the URL is in API format, fall back to the book entity's preview image path.
             String fileName;
             if (receivedUrl.startsWith("/api/")) {
                 Book bookEntity = bookGenerationService.getBookEntity(bookId);
@@ -221,13 +210,10 @@ public class BookController {
                 fileName = Paths.get(receivedUrl).getFileName().toString();
             }
 
-            // Define the fixed base directory for preview images.
             String baseDir = "C:\\Users\\Youcode\\Desktop\\autobook\\s3\\uploads\\previews";
-            // Construct the full image path.
             String imagePath = Paths.get(baseDir, fileName).toString();
             log.info("Attempting to serve preview image from path: {}", imagePath);
 
-            // Validate that the file exists.
             Path path = Paths.get(imagePath);
             if (!Files.exists(path)) {
                 log.error("Preview image does not exist at path: {}", imagePath);
@@ -260,7 +246,6 @@ public class BookController {
                 return ResponseEntity.notFound().build();
             }
 
-            // Determine the filename: if the URL is in API format, fall back to the book entity's preview image path.
             String fileName;
             if (receivedUrl.startsWith("/api/")) {
                 Book bookEntity = bookGenerationService.getBookEntity(bookId);
@@ -269,13 +254,10 @@ public class BookController {
                 fileName = Paths.get(receivedUrl).getFileName().toString();
             }
 
-            // Define the fixed base directory for preview images.
             String baseDir = "C:\\Users\\Youcode\\Desktop\\autobook\\s3\\uploads\\previews";
-            // Construct the full image path.
             String imagePath = Paths.get(baseDir, fileName).toString();
             log.info("Attempting to serve preview image from path: {}", imagePath);
 
-            // Validate that the file exists.
             Path path = Paths.get(imagePath);
             if (!Files.exists(path)) {
                 log.error("Preview image does not exist at path: {}", imagePath);
@@ -307,7 +289,6 @@ public class BookController {
 //                return ResponseEntity.notFound().build();
 //            }
 //
-//            // Determine the filename: if the URL is in API format, use the actual cover image path from the book entity.
 //            String fileName;
 //            if (receivedUrl.startsWith("/api/")) {
 //                Book bookEntity = bookGenerationService.getBookEntity(bookId);
@@ -316,13 +297,10 @@ public class BookController {
 //                fileName = Paths.get(receivedUrl).getFileName().toString();
 //            }
 //
-//            // Define the fixed base directory for cover images.
 //            String baseDir = "C:\\Users\\Youcode\\Desktop\\autobook\\pdf-service\\uploads\\previews";
-//            // Construct the full image path.
 //            String imagePath = Paths.get(baseDir, fileName).toString();
 //            log.info("Attempting to serve cover image from path: {}", imagePath);
 //
-//            // Validate that the file exists.
 //            Path path = Paths.get(imagePath);
 //            if (!Files.exists(path)) {
 //                log.error("Cover image does not exist at path: {}", imagePath);

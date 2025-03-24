@@ -65,7 +65,6 @@ public class CollectionService {
                 ));
             } catch (Exception e) {
                 log.error("Error fetching book details for book ID: {}", collectionBook.getBookId(), e);
-                // Add a placeholder if book details cannot be fetched
                 bookSummaries.add(new CollectionDto.BookSummary(
                         collectionBook.getBookId(),
                         "Unknown Book",

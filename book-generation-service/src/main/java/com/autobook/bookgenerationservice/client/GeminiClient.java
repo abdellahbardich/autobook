@@ -33,16 +33,13 @@ public class GeminiClient {
             log.info("Generating text with Gemini for prompt: {}",
                     prompt.length() > 100 ? prompt.substring(0, 100) + "..." : prompt);
 
-            // Build the URL with API key
             String url = UriComponentsBuilder.fromHttpUrl(apiUrl)
                     .queryParam("key", apiKey)
                     .toUriString();
 
-            // Prepare headers
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
 
-            // Prepare request body
             Map<String, Object> contents = new HashMap<>();
             contents.put("role", "user");
             contents.put("parts", List.of(Map.of("text", prompt)));
@@ -56,10 +53,8 @@ public class GeminiClient {
                     "maxOutputTokens", 2048
             ));
 
-            // Create request entity
             HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(payload, headers);
 
-            // Make API call to Gemini
             ResponseEntity<String> response = restTemplate.exchange(
                     url,
                     HttpMethod.POST,
@@ -67,7 +62,6 @@ public class GeminiClient {
                     String.class
             );
 
-            // Process response
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                 JsonNode jsonResponse = objectMapper.readTree(response.getBody());
                 JsonNode candidates = jsonResponse.path("candidates");

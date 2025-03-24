@@ -17,7 +17,6 @@ public class CorsConfig {
         corsConfiguration.addAllowedMethod("*");
         corsConfiguration.addAllowedHeader("*");
 
-        // Use the reactive UrlBasedCorsConfigurationSource
         CorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         ((UrlBasedCorsConfigurationSource) source).registerCorsConfiguration("/**", corsConfiguration);
 

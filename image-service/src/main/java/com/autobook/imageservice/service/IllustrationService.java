@@ -24,7 +24,6 @@ public class IllustrationService {
                 throw new IllegalArgumentException("Prompt is required for illustration generation");
             }
 
-            // Generate illustrations using Consistory API
             List<Map<String, String>> illustrations = consistoryClient.generateIllustrations(prompt, style);
 
             if (illustrations.isEmpty()) {

@@ -24,7 +24,6 @@ public class CoverImageService {
 
     public Map<String, String> generateCoverImage(String title, String style) {
         try {
-            // Generate cover image using Consistory API
             String imagePath = consistoryClient.generateCoverImage(title, style);
 
             if (imagePath == null) {
@@ -32,7 +31,6 @@ public class CoverImageService {
                 throw new RuntimeException("Failed to generate cover image");
             }
 
-            // Add text overlay if needed (Consistory might not add text reliably)
             String outputPath = addTextOverlay(imagePath, title);
 
             Map<String, String> result = new HashMap<>();
@@ -46,51 +44,40 @@ public class CoverImageService {
 
     private String addTextOverlay(String imagePath, String title) {
         try {
-            // Read the base image
             BufferedImage originalImage = ImageIO.read(new File(imagePath));
 
-            // Create a new image with the same dimensions
             BufferedImage newImage = new BufferedImage(
                     originalImage.getWidth(),
                     originalImage.getHeight(),
                     BufferedImage.TYPE_INT_ARGB
             );
 
-            // Create a graphics context for the new image
             Graphics2D g2d = newImage.createGraphics();
 
-            // Draw the original image
             g2d.drawImage(originalImage, 0, 0, null);
 
-            // Set up the font and color for the title
             Font titleFont = new Font("Arial", Font.BOLD, 48);
             g2d.setFont(titleFont);
             g2d.setColor(Color.WHITE);
 
-            // Add shadow to make text readable
             g2d.setRenderingHint(
                     RenderingHints.KEY_TEXT_ANTIALIASING,
                     RenderingHints.VALUE_TEXT_ANTIALIAS_ON
             );
 
-            // Calculate position for the title (center horizontally, towards the bottom)
             FontMetrics fm = g2d.getFontMetrics();
             int titleWidth = fm.stringWidth(title);
             int x = (originalImage.getWidth() - titleWidth) / 2;
             int y = originalImage.getHeight() - 100; // 100 pixels from the bottom
 
-            // Draw shadow
             g2d.setColor(Color.BLACK);
             g2d.drawString(title, x + 2, y + 2);
 
-            // Draw actual text
             g2d.setColor(Color.WHITE);
             g2d.drawString(title, x, y);
 
-            // Clean up
             g2d.dispose();
 
-            // Save the new image
             String outputFilename = "cover_with_text_" + UUID.randomUUID() + ".png";
             Path outputPath = Paths.get(imagePath).getParent().resolve(outputFilename);
             File outputFile = outputPath.toFile();

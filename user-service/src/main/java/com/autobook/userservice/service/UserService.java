@@ -28,7 +28,6 @@ public class UserService {
 
     @Transactional
     public UserDto.UserResponse registerUser(UserDto.RegisterRequest registerRequest) {
-        // Check if username or email exists
         if (userRepository.existsByUsername(registerRequest.getUsername())) {
             throw new RuntimeException("Username is already taken!");
         }
@@ -37,7 +36,6 @@ public class UserService {
             throw new RuntimeException("Email is already in use!");
         }
 
-        // Create new user
         User user = new User();
         user.setUsername(registerRequest.getUsername());
         user.setEmail(registerRequest.getEmail());
@@ -54,14 +52,11 @@ public class UserService {
         String username;
         User user;
 
-        // Determine if input is email or username
         if (usernameOrEmail.contains("@")) {
-            // It's an email, find the corresponding username
             user = userRepository.findByEmail(usernameOrEmail)
                     .orElseThrow(() -> new UsernameNotFoundException("User not found with email: " + usernameOrEmail));
             username = user.getUsername();
         } else {
-            // It's a username, check if it exists
             if (!userRepository.existsByUsername(usernameOrEmail)) {
                 throw new UsernameNotFoundException("User not found with username: " + usernameOrEmail);
             }
@@ -71,7 +66,6 @@ public class UserService {
         }
 
         try {
-            // Authenticate with the username
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
                             username,
@@ -81,7 +75,6 @@ public class UserService {
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
 
-            // Generate JWT token with user ID
             String jwt = tokenProvider.generateToken(authentication, user.getUserId());
 
             log.info("User authenticated successfully: {}", username);

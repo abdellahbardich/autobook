@@ -42,11 +42,10 @@ public class BookGenerationService {
 
     private static final String UPLOADS_DIR = "uploads/images/";
     private static final int MAX_RETRY_ATTEMPTS = 3;
-    private static final long RETRY_DELAY_MS = 5000; // 5 seconds
+    private static final long RETRY_DELAY_MS = 5000;
 
     @Transactional
     public BookDto.BookResponse createBook(BookDto.BookCreationRequest request) {
-        // Create book in database
         Book book = new Book();
         book.setConversationId(request.getConversationId());
         book.setMessageId(request.getMessageId());
@@ -56,11 +55,9 @@ public class BookGenerationService {
         book.setStatus(Book.BookStatus.PROCESSING);
         Book savedBook = bookRepository.save(book);
 
-        // Send message to Kafka to trigger processing
         log.info("Sending book generation request to Kafka for book ID: {}", savedBook.getBookId());
         kafkaTemplate.send("book-generation-requests", savedBook.getBookId().toString(), request);
 
-        // Return response
         return new BookDto.BookResponse(
                 savedBook.getBookId(),
                 savedBook.getTitle(),
@@ -78,18 +75,15 @@ public class BookGenerationService {
         try {
             log.info("Received book generation request for title: {}", request.getTitle());
 
-            // Find existing book with the same conversation ID and title
             List<Book> existingBooks = bookRepository.findByConversationId(request.getConversationId());
             Optional<Book> existingBook = existingBooks.stream()
                     .filter(b -> b.getTitle().equals(request.getTitle()))
                     .findFirst();
 
             if (existingBook.isPresent()) {
-                // Update existing book
                 book = existingBook.get();
                 log.info("Found existing book with ID: {}, updating instead of creating new", book.getBookId());
             } else {
-                // Create a new book if no existing book found (this should not happen with fixed code)
                 book = new Book();
                 book.setConversationId(request.getConversationId());
                 book.setMessageId(request.getMessageId());
@@ -101,7 +95,6 @@ public class BookGenerationService {
                 log.info("Created new book with ID: {}", book.getBookId());
             }
 
-            // Generate summary using Gemini with retry
             String summary = generateTextWithRetry(() ->
                             generateBookSummary(request.getPrompt(), request.getTitle()),
                     "book summary");
@@ -109,10 +102,8 @@ public class BookGenerationService {
             book.setSummary(summary);
             bookRepository.save(book);
 
-            // Generate chapters with retry
             List<BookContent> chapters = generateChaptersWithRetry(book, request.getPrompt(), request.getNumChapters());
 
-            // Generate cover image
             Map<String, String> coverRequest = new HashMap<>();
             coverRequest.put("title", request.getTitle());
             coverRequest.put("style", request.getStylePrompt());
@@ -120,16 +111,12 @@ public class BookGenerationService {
             Map<String, String> coverResponse = imageServiceClient.generateCoverImage(coverRequest);
             String coverPath = coverResponse.get("coverImagePath");
 
-            // Ensure path is stored in a normalized format
             coverPath = normalizePath(coverPath);
             book.setCoverImagePath(coverPath);
-
-            // Generate illustrations if needed
             if (request.isIncludeIllustrations() && request.getBookType() == Book.BookType.TEXT_IMAGE) {
                 generateIllustrations(book, chapters, request.getStylePrompt());
             }
 
-            // Generate PDF
             Map<String, Object> pdfRequest = new HashMap<>();
             pdfRequest.put("bookId", book.getBookId());
             pdfRequest.put("title", book.getTitle());
@@ -143,13 +130,11 @@ public class BookGenerationService {
             pdfPath = normalizePath(pdfPath);
             book.setPdfPath(pdfPath);
 
-            // Generate preview image
             Map<String, String> previewResponse = pdfServiceClient.generatePreviewImage(book.getPdfPath());
             String previewPath = previewResponse.get("previewImagePath");
             previewPath = normalizePath(previewPath);
             book.setPreviewImagePath(previewPath);
 
-            // Update book status to complete
             book.setStatus(Book.BookStatus.COMPLETE);
             bookRepository.save(book);
 
@@ -157,7 +142,6 @@ public class BookGenerationService {
         } catch (Exception e) {
             log.error("Error processing book generation request", e);
 
-            // Update book status to error if book exists
             if (book != null) {
                 try {
                     book.setStatus(Book.BookStatus.FAILED);
@@ -172,16 +156,13 @@ public class BookGenerationService {
         }
     }
 
-    // Helper method to normalize file paths (remove Windows-specific elements)
     private String normalizePath(String path) {
         if (path == null) return null;
 
-        // Extract just the filename if it's a full Windows path
         if (path.contains(":\\")) {
             Path p = Paths.get(path);
             String filename = p.getFileName().toString();
 
-            // For illustrations, store them in the uploads directory
             if (path.contains("illustration")) {
                 return UPLOADS_DIR + filename;
             }
@@ -190,7 +171,6 @@ public class BookGenerationService {
         return path;
     }
 
-    // Generic retry method for handling rate limiting
     private <T> T generateTextWithRetry(TextGenerator<T> generator, String operationName) throws Exception {
         Exception lastException = null;
 
@@ -200,13 +180,11 @@ public class BookGenerationService {
             } catch (Exception e) {
                 lastException = e;
 
-                // Check if this is a rate limit error (429)
                 if (e.getMessage() != null && e.getMessage().contains("429")) {
                     log.warn("Rate limit hit for {} (attempt {}/{}), retrying after {} ms",
                             operationName, attempt, MAX_RETRY_ATTEMPTS, RETRY_DELAY_MS);
                     Thread.sleep(RETRY_DELAY_MS * attempt); // Exponential backoff
                 } else {
-                    // For other errors, don't retry
                     throw e;
                 }
             }
@@ -216,7 +194,6 @@ public class BookGenerationService {
                 new RuntimeException("Failed to generate " + operationName + " after " + MAX_RETRY_ATTEMPTS + " attempts");
     }
 
-    // Functional interface for retry operations
     @FunctionalInterface
     private interface TextGenerator<T> {
         T generate() throws Exception;
@@ -233,7 +210,6 @@ public class BookGenerationService {
     }
 
     private List<BookContent> generateChaptersWithRetry(Book book, String prompt, int numChapters) throws Exception {
-        // First generate chapter titles with retry
         String chapterTitlesResponse = generateTextWithRetry(() -> {
             String titlesPrompt = String.format(
                     "Create %d chapter titles for a book titled '%s' based on this prompt: %s. " +
@@ -246,7 +222,6 @@ public class BookGenerationService {
         String[] chapterTitles = chapterTitlesResponse.split("\n");
         List<BookContent> chapters = new ArrayList<>();
 
-        // Generate content for each chapter with retry
         for (int i = 0; i < numChapters && i < chapterTitles.length; i++) {
             final int chapterIndex = i;
             String chapterTitle = chapterTitles[i].replaceAll("^\\d+\\.\\s*", "").trim();
@@ -273,7 +248,6 @@ public class BookGenerationService {
     }
 
     private void generateIllustrations(Book book, List<BookContent> chapters, String stylePrompt) {
-        // For each chapter, generate an illustration based on the content
         for (BookContent chapter : chapters) {
             try {
                 Map<String, Object> illustrationRequest = new HashMap<>();
@@ -295,7 +269,6 @@ public class BookGenerationService {
                 }
             } catch (Exception e) {
                 log.error("Failed to generate illustration for chapter {}", chapter.getChapterNumber(), e);
-                // Continue with other chapters even if one fails
             }
         }
     }
@@ -308,7 +281,6 @@ public class BookGenerationService {
                     chapterMap.put("chapterTitle", chapter.getChapterTitle());
                     chapterMap.put("chapterContent", chapter.getChapterContent());
 
-                    // Normalize illustration path
                     String illustrationPath = chapter.getIllustrationPath();
                     if (illustrationPath != null) {
                         illustrationPath = normalizePath(illustrationPath);
@@ -338,7 +310,6 @@ public class BookGenerationService {
                 .map(chapter -> {
                     String illustrationUrl = null;
                     if (chapter.getIllustrationPath() != null) {
-                        // Extract just the filename for the URL
                         String filename = Paths.get(chapter.getIllustrationPath()).getFileName().toString();
                         illustrationUrl = "/api/books/illustrations/" + filename;
                     }

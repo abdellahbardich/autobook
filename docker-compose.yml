@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Service Registry (Eureka Server)
   service-registry:
@@ -12,7 +10,7 @@ services:
 
   # API Gateway
   api-gateway:
-    build: ./api-gateway-service
+    build: ./api-gateway
     container_name: api-gateway
     ports:
       - "8080:8080"
@@ -76,7 +74,6 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/autobook_book_db
       - SPRING_DATASOURCE_USERNAME=user
       - SPRING_DATASOURCE_PASSWORD=password
-      - OLLAMA_API_URL=http://host.docker.internal:11434
     networks:
       - autobook-network
     extra_hosts:
